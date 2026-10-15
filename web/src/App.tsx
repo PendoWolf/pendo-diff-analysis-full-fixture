@@ -1,26 +1,91 @@
 import { useEffect, useState } from "react";
-import { api, type AppState } from "./api";
+import { api, ApiError, type AppState } from "./api";
+
+type Action = "load" | "increment" | "decrement" | "reset" | "refresh";
+type TrackProps = Record<string, string | number | boolean>;
 
 // Seam for Pendo. Novus installs the Pendo agent, which provides window.pendo
-// at runtime; this fires a Track Event for each action. No-op when the agent
+// at runtime; this fires a Track Event with its properties. No-op when the agent
 // isn't present (local dev), so the app and Playwright mocks both stay simple.
-function trackEvent(name: string) {
+function trackEvent(name: string, props: TrackProps) {
   if (typeof window !== "undefined") {
-    window.pendo?.track?.(`demo-${name}`);
+    try {
+      window.pendo?.track?.(name, props);
+    } catch {
+      // Analytics must never break the app or be reported as a failed action.
+    }
   }
 }
+
+// Fired once an action's request succeeded and its result is on screen. `before`
+// is the state the visitor saw when they triggered it; `after` is what the API
+// returned. Event names are registered in Pendo (and asserted in tests), so keep
+// them exactly as written.
+function trackSuccess(action: Action, before: AppState, after: AppState) {
+  switch (action) {
+    case "load":
+      trackEvent("demo-load", { counter: after.counter, lastAction: after.lastAction });
+      break;
+    case "increment":
+      trackEvent("demo-increment", { counter: after.counter, previousCounter: before.counter });
+      break;
+    case "decrement":
+      trackEvent("demo-decrement", { counter: after.counter, previousCounter: before.counter });
+      break;
+    case "reset":
+      // counter is always 0 afterwards, so record what was cleared instead.
+      trackEvent("demo-reset", { previousCounter: before.counter, previousLastAction: before.lastAction });
+      break;
+    case "refresh":
+      // The counter is shared by every visitor; counterChanged shows whether the
+      // refresh picked up a change made in another session.
+      trackEvent("demo-refresh", {
+        counter: after.counter,
+        lastAction: after.lastAction,
+        previousCounter: before.counter,
+        counterChanged: after.counter !== before.counter,
+      });
+      break;
+  }
+}
+
+// Fired when any action's request fails; `action` says which one. method, path
+// and httpStatus come from ApiError. httpStatus is only set when the server
+// responded, so network/CORS errors are the failures without one.
+function trackFailure(action: Action, e: unknown) {
+  const props: TrackProps = {
+    action,
+    errorMessage: (e instanceof Error ? e.message : String(e)).slice(0, 100),
+  };
+  if (e instanceof ApiError) {
+    props.method = e.method;
+    props.path = e.path;
+    if (e.httpStatus !== undefined) props.httpStatus = e.httpStatus;
+  }
+  trackEvent("demo-action-failed", props);
+}
+
+// React StrictMode runs the mount effect twice in development, so the initial
+// load runs twice there. This flag is module-level (it survives that remount) and
+// keeps tracking of the initial load, success or failure, to once per page.
+let initialLoadTracked = false;
 
 export default function App() {
   const [state, setState] = useState<AppState>({ counter: 0, lastAction: "none" });
   const [error, setError] = useState<string | null>(null);
 
-  const run = async (name: string, fn: () => Promise<AppState>) => {
+  const run = async (action: Action, fn: () => Promise<AppState>) => {
+    const before = state;
+    const shouldTrack = action !== "load" || !initialLoadTracked;
+    if (action === "load") initialLoadTracked = true;
     try {
       setError(null);
-      setState(await fn());
-      trackEvent(name);
+      const after = await fn();
+      setState(after);
+      if (shouldTrack) trackSuccess(action, before, after);
     } catch (e) {
       setError((e as Error).message);
+      if (shouldTrack) trackFailure(action, e);
     }
   };
 
