@@ -7,9 +7,23 @@ export interface AppState {
   lastAction: string;
 }
 
+// Thrown when the API responds with a non-2xx status. Keeps the request details
+// as fields (not only in the message) so failures can be reported to Pendo as
+// structured Track Event properties.
+export class ApiError extends Error {
+  constructor(
+    readonly method: string,
+    readonly path: string,
+    readonly status: number,
+  ) {
+    super(`${method} ${path} failed: ${status}`);
+    this.name = "ApiError";
+  }
+}
+
 async function call(path: string, method: "GET" | "POST"): Promise<AppState> {
   const res = await fetch(`${BASE}${path}`, { method });
-  if (!res.ok) throw new Error(`${method} ${path} failed: ${res.status}`);
+  if (!res.ok) throw new ApiError(method, path, res.status);
   return res.json() as Promise<AppState>;
 }
 
