@@ -44,6 +44,18 @@ export default function App() {
         <button data-testid="btn-increment" onClick={() => run("increment", api.increment)}>
           Increment
         </button>
+        <button data-testid="btn-qaw-full-mwcw1k75" onClick={() => run("qaw-full-1794448059521", api.increment)}>
+          QAW Full 1794448059521
+        </button>
+        <button data-testid="btn-double" onClick={() => run("double", api.reset)}>
+          Double
+        </button>
+        <button data-testid="btn-favorite" onClick={() => run("favorite", api.getState)}>
+          ★
+        </button>
+        <span data-testid="double-hint" style={{ color: "#e5e5e5", fontSize: 11 }}>
+          Tip: Double doubles your count
+        </span>
         <button data-testid="btn-decrement" onClick={() => run("decrement", api.decrement)}>
           Decrement
         </button>
